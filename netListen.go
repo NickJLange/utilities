@@ -5,6 +5,7 @@ import (
     "fmt"
     "net"
     "os"
+    "time"
 )
 
 const (
@@ -19,28 +20,65 @@ func main() {
     portPtr := flag.String("port","3333","Port number to listen on")
     protPtr := flag.String("protocol","tcp","Proto - defaults to tcp")
     flag.Parse()
-    fmt.Printf("Will listen on %v:%v/%v\n", *wordPtr,*portPtr,*protPtr)
+    //FIXME - Validate Arguments ???
 
 
-    // Listen for incoming connections.
-    l, err := net.Listen(*protPtr, *wordPtr +":"+ *portPtr)
-    if err != nil {
-        fmt.Println("Error listening:", err.Error())
-        os.Exit(1)
+    returnCode := ListenLoop(*wordPtr,*portPtr,*protPtr,10)
+    if (returnCode !=0) {
+        //Try Try again?
+        fmt.Println("Exiting normally on abnormal code ", returnCode)
+        os.Exit(0)
     }
-    // Close the listener when the application closes.
-    defer l.Close()
-    fmt.Println("Listening on " + *wordPtr + ":" + *portPtr)
-    for {
-        // Listen for an incoming connection.
-        conn, err := l.Accept()
-        if err != nil {
-            fmt.Println("Error accepting: ", err.Error())
-            os.Exit(1)
+    fmt.Println("Exiting normally on normal code ", returnCode)
+
+}
+
+
+//Main Loop After Arg Parse
+func ListenLoop(host,port,prot string, timeout int) int {
+  if (prot != "tcp") {
+    return -99
+  }
+  var junky error
+  fmt.Printf("Will listen on %v:%v/%v\n", host,port,prot)
+  resolvedAddr, junky := net.ResolveTCPAddr(prot,host +":"+ port)
+  if (junky != nil){
+    fmt.Println("Error resolving:", junky.Error())
+    return -99
+  }
+  // Listen for incoming connections.
+  l, junky := net.ListenTCP(prot, resolvedAddr)
+  if junky != nil {
+      fmt.Println("Error listening:", junky.Error())
+      return -1
+  }
+
+  junky = l.SetDeadline(time.Now().Add(time.Duration(timeout)*time.Second))
+  if junky != nil {
+      fmt.Println("Error Setting Timeout ",timeout," - ", junky.Error())
+      return -1
+  }
+
+  // Close the listener when the application closes.
+  // FIXME - is this still valid when moved to a function?
+  defer l.Close()
+  fmt.Println("Actually Listening on " + host + ":" + port)
+  for {
+      // Listen for an incoming connection.
+      conn, err := l.Accept()
+      if err != nil {
+        if err, ok := err.(*net.OpError); ok && err.Timeout() {
+          // it was a timeout
+          return 0
         }
-        // Handle connections in a new goroutine.
-        go handleRequest(conn)
-    }
+        fmt.Println("Error accepting: ", err.Error())
+        return -2
+
+      }
+      // Handle connections in a new goroutine.
+      go handleRequest(conn)
+  }
+  return 0
 }
 
 // Handles incoming requests.
